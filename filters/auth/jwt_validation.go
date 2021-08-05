@@ -157,11 +157,7 @@ func (f *jwtValidationFilter) Request(ctx filters.FilterContext) {
 			for _, bodykey := range body["keys"].([]interface{}) {
 				key := bodykey.(map[string]interface{})
 				kid := key["kid"].(string)
-				rsakey := new(rsa.PublicKey)
-				number, _ := base64.RawURLEncoding.DecodeString(key["n"].(string))
-				rsakey.N = new(big.Int).SetBytes(number)
-				rsakey.E = 65537
-				rsakeys[kid] = rsakey
+				rsakeys[kid] = parsePublicKey(key["n"].(string))
 			}
 		} else {
 			log.Error("Not able to get public keys")
@@ -254,4 +250,13 @@ func (f *jwtValidationFilter) setHeaders(ctx filters.FilterContext, container jw
 		ctx.Request().Header.Set(key, match.(string))
 	}
 	return
+}
+
+func parsePublicKey(encodedKey string) *rsa.PublicKey {
+	rsakey := new(rsa.PublicKey)
+	number, _ := base64.RawURLEncoding.DecodeString(encodedKey)
+	rsakey.N = new(big.Int).SetBytes(number)
+	rsakey.E = 65537
+
+	return rsakey
 }
