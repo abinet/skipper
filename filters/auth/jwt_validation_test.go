@@ -1,13 +1,19 @@
 package auth
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
+
+	"github.com/dgrijalva/jwt-go"
 
 	"github.com/zalando/skipper/eskip"
 	"github.com/zalando/skipper/filters"
@@ -16,46 +22,55 @@ import (
 )
 
 const (
-	testJwtToken = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6Im5PbzNaRHJPRFhFSzFqS1doWHNsSFJfS1hFZyIsImtpZCI6Im5PbzNaRHJPRFhFSzFqS1doWHNsSFJfS1hFZyJ9.eyJhdWQiOiJodHRwczovL3Rlc3QtbWFyaWEuYXBwbGljYXRpb25zLjFjb3JwLm9yZyIsImlzcyI6Imh0dHBzOi8vc3RzLndpbmRvd3MubmV0L2ExZWFjYmQ1LWZiMGUtNDZmMS04MWUzLTQ5NjVlYThlNDViYi8iLCJpYXQiOjE2MjAyMTgxNTksIm5iZiI6MTYyMDIxODE1OSwiZXhwIjoxNjIwMjIyMDU5LCJhaW8iOiJFMlpnWUloTTkyTHJlRDUxU3BHWTdEWW0zM1dyQUE9PSIsImFwcGlkIjoiMmQ2MDA4YjMtNjAxMi00ZjIyLWEwMWUtMzMzMWM2MDk3ZTdhIiwiYXBwaWRhY3IiOiIxIiwiaWRwIjoiaHR0cHM6Ly9zdHMud2luZG93cy5uZXQvYTFlYWNiZDUtZmIwZS00NmYxLTgxZTMtNDk2NWVhOGU0NWJiLyIsIm9pZCI6IjBjNjA5Mzk0LWI4ZmItNDJkNi04MjQ2LWFiMmI0NTcyY2E2NyIsInJoIjoiMC5BU0VBMWN2cW9RNzc4VWFCNDBsbDZvNUZ1N01JWUMwU1lDSlBvQjR6TWNZSmZub2hBQUEuIiwic3ViIjoiMGM2MDkzOTQtYjhmYi00MmQ2LTgyNDYtYWIyYjQ1NzJjYTY3IiwidGlkIjoiYTFlYWNiZDUtZmIwZS00NmYxLTgxZTMtNDk2NWVhOGU0NWJiIiwidXRpIjoiOHZNSDExLUpvVU9xeU81aE1SQW1BZyIsInZlciI6IjEuMCJ9.BL_OL-IWr7w0NMsym_etT_30EpAZYM3zCWlnCynxyQUMfrfDqw2-J35efhKEm44BDAzdrIk-8ksl_FpPfdtCPl-G_Hwx7ye5-tjOeTpPc2mJI67Q2mpvNBA_IvWPpvYVtrcZnNeY9Xykc9Xd9G7YY1-RfuJK1F2Ud0_Sb1YG8y51UQm1UiDz2X6RT6iKotSl9L1iG8UifM7CCSA4N70P9JlgB5l1YYQoKD5ZiDSBKKPOiW7KsK6S_f3Z_MVjtBExoatQrPbrCPOjkNraBMiwDixODeoiyf6GihbZFXVNw2qX8RCtOGMQ9VwHheEAawS-ehaVb-FiLwAJNuWdUEtMhg"
+	kid                    = "mykid"
+	validClaim3            = "sub"
+	invalidSupportedClaim3 = "email"
 )
-
-/*func introspectionEndpointGetToken(r *http.Request) (string, error) {
-	if tok := r.FormValue(tokenKey); tok != "" {
-		return tok, nil
-	}
-	return "", errInvalidToken
-}*/
-
-/*func getTestJWTOidcConfig() *openIDConfig {
-	return &openIDConfig{
-		Issuer:                "https://identity.example.com",
-		AuthorizationEndpoint: "https://identity.example.com/oauth2/authorize",
-		TokenEndpoint:         "https://identity.example.com/oauth2/token",
-		UserinfoEndpoint:      "https://identity.example.com/oauth2/userinfo",
-		RevocationEndpoint:    "https://identity.example.com/oauth2/revoke",
-		JwksURI:               "https://identity.example.com/.well-known/jwk_uris",
-		RegistrationEndpoint:  "https://identity.example.com/oauth2/register",
-		//IntrospectionEndpoint:             "https://identity.example.com/oauth2/introspection",
-		ResponseTypesSupported:            []string{"code", "token", "code token"},
-		SubjectTypesSupported:             []string{"public"},
-		IDTokenSigningAlgValuesSupported:  []string{"RS256", "ES512", "PS384"},
-		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic"},
-		ClaimsSupported:                   []string{"sub", "name", "email", "azp", "iss", "exp", "iat", "https://identity.example.com/token", "https://identity.example.com/realm", "https://identity.example.com/bp", "https://identity.example.com/privileges"},
-		ScopesSupported:                   []string{"openid", "email"},
-		CodeChallengeMethodsSupported:     []string{"plain", "S256"},
-	}
-}*/
 
 var (
-	/*validClaim1           = "email"
-	  validClaim1Value      = "jdoe@example.com"
-	  validClaim2           = "name"
-	  validClaim2Value      = "Jane Doe"
-	  invalidSupportedClaim = "sub"
-	  invalidFilterExpected = 999*/
-	validClaim3            = "sub"
-	invalidSupportedClaim2 = "email"
+	privateKey, _ = rsa.GenerateKey(rand.Reader, 2048)
 )
+
+func createToken() string {
+	// Create the Claims
+	claims := &jwt.StandardClaims{
+		ExpiresAt: time.Now().Unix() + 1000,
+		Issuer:    "test",
+		Subject:   "aaa",
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = kid
+
+	s, err := token.SignedString(privateKey)
+
+	fmt.Printf("Token: %v %v", s, err)
+
+	return s
+}
+
+func TestToken(t *testing.T) {
+	s := createToken()
+
+	publicKeyString := base64.RawURLEncoding.EncodeToString(privateKey.PublicKey.N.Bytes())
+
+	parsedToken, err := jwt.Parse(s, func(token *jwt.Token) (interface{}, error) {
+		return parsePublicKey(publicKeyString), nil
+	})
+
+	if err != nil {
+		t.Errorf("Failed to json decode: %v", err)
+		return
+	}
+
+	err = parsedToken.Claims.Valid()
+
+	if err != nil {
+		t.Errorf("Failed token: %v", err)
+		return
+	}
+
+}
 
 func TestJWTValidation(t *testing.T) {
 	cli := net.NewClient(net.Options{
@@ -73,7 +88,7 @@ func TestJWTValidation(t *testing.T) {
 		}
 
 		allKeys := map[string][]interface{}{}
-		allKeys["keys"] = append(allKeys["keys"], map[string]interface{}{"kid": "nOo3ZDrODXEK1jKWhXslHR_KXEg", "n": "oaLLT9hkcSj2tGfZsjbu7Xz1Krs0qEicXPmEsJKOBQHauZ_kRM1HdEkgOJbUznUspE6xOuOSXjlzErqBxXAu4SCvcvVOCYG2v9G3-uIrLF5dstD0sYHBo1VomtKxzF90Vslrkn6rNQgUGIWgvuQTxm1uRklYFPEcTIRw0LnYknzJ06GC9ljKR617wABVrZNkBuDgQKj37qcyxoaxIGdxEcmVFZXJyrxDgdXh9owRmZn6LIJlGjZ9m59emfuwnBnsIQG7DirJwe9SXrLXnexRQWqyzCdkYaOqkpKrsjuxUj2-MHX31FqsdpJJsOAvYXGOYBKJRjhGrGdONVrZdUdTBQ", "e": "AQAB"})
+		allKeys["keys"] = append(allKeys["keys"], map[string]interface{}{"kid": kid, "n": base64.RawURLEncoding.EncodeToString(privateKey.PublicKey.N.Bytes()), "e": "AQAB"})
 		if r.URL.Path != testAuthPath {
 			w.WriteHeader(488)
 			return
@@ -121,7 +136,7 @@ func TestJWTValidation(t *testing.T) {
 	}, {
 		msg:         "jwtValidationAnyClaims: invalid token",
 		authBaseURL: testAuthPath,
-		args:        []interface{}{validClaim1},
+		args:        []interface{}{validClaim3},
 		hasAuth:     true,
 		auth:        "invalid-token",
 		expected:    http.StatusUnauthorized,
@@ -130,44 +145,29 @@ func TestJWTValidation(t *testing.T) {
 		authBaseURL: testAuthPath,
 		args:        []interface{}{"unsupported-claim"},
 		hasAuth:     true,
-		auth:        testJwtToken,
+		auth:        createToken(),
 		expected:    invalidFilterExpected,
 	}, {
 		msg:         "jwtValidationAnyClaims: valid claim",
 		authBaseURL: testAuthPath,
 		args:        []interface{}{validClaim3},
 		hasAuth:     true,
-		auth:        testJwtToken,
+		auth:        createToken(),
 		expected:    http.StatusOK,
 	}, {
 		msg:         "jwtValidationAnyClaims: invalid claim",
 		authBaseURL: testAuthPath,
-		args:        []interface{}{invalidSupportedClaim2},
+		args:        []interface{}{invalidSupportedClaim3},
 		hasAuth:     true,
-		auth:        testJwtToken,
+		auth:        createToken(),
 		expected:    http.StatusUnauthorized,
-	}, {
-		msg:         "jwtValidationAnyClaims: valid token, one valid claim",
-		authBaseURL: testAuthPath,
-		args:        []interface{}{validClaim3, validClaim2},
-		hasAuth:     true,
-		auth:        testJwtToken,
-		expected:    http.StatusOK,
 	}, {
 		msg:         "jwtValidationAnyClaims: valid token, one valid claim, one invalid supported claim",
 		authBaseURL: testAuthPath,
-		args:        []interface{}{validClaim3, invalidSupportedClaim2},
+		args:        []interface{}{validClaim3 + " " + invalidSupportedClaim3},
 		hasAuth:     true,
-		auth:        testJwtToken,
+		auth:        createToken(),
 		expected:    http.StatusOK,
-	}, {
-
-		msg:         "jwtValidationAnyClaims: invalid token",
-		authBaseURL: testAuthPath,
-		args:        []interface{}{validClaim1},
-		hasAuth:     true,
-		auth:        "invalid-token",
-		expected:    http.StatusUnauthorized,
 	}} {
 		t.Run(ti.msg, func(t *testing.T) {
 			if ti.msg == "" {
