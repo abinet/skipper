@@ -845,10 +845,7 @@ func TestOIDCSetup(t *testing.T) {
 			}
 
 			sargs = append(sargs, tc.upstreamheaders)
-
-			if tc.subdomainsToRemove != "" {
-				sargs = append(sargs, tc.subdomainsToRemove)
-			}
+			sargs = append(sargs, tc.subdomainsToRemove)
 
 			f, err := spec.CreateFilter(sargs)
 			if tc.expectErr {
